@@ -8,11 +8,11 @@ import {
   getDbStats,
   getCollections,
   getCollectionDocuments,
+  deleteCollection,
   type DbStats,
   type ImportResult,
 } from '@/actions/database';
 import { backupToDrive, type BackupResult } from '@/actions/backup';
-import { updateBackupFrequency } from '@/actions/coolify';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -87,6 +87,95 @@ function flattenDoc(doc: Record<string, unknown>, prefix = ''): Record<string, s
     }
   }
   return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delete Collection Modal
+// ─────────────────────────────────────────────────────────────────────────────
+function DeleteCollectionModal({
+  collection,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  collection: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const [typed, setTyped] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 10000, padding: '1rem',
+    }}>
+      <div style={{
+        background: '#0a0a0a', border: '1px solid rgba(248,113,113,0.3)',
+        padding: '2rem', maxWidth: 440, width: '100%',
+        display: 'flex', flexDirection: 'column', gap: '1.25rem',
+      }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="1.5" style={{ flexShrink: 0, marginTop: 2 }}>
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div>
+            <div style={{ fontFamily: 'monospace', fontSize: '0.65rem', letterSpacing: '0.14em', color: 'rgba(248,113,113,0.6)', marginBottom: '0.4rem' }}>
+              DESTRUCTIVE ACTION
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>
+              Delete collection "{collection}"?
+            </div>
+            <p style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.4)', lineHeight: 1.6, margin: 0 }}>
+              This will permanently drop the entire collection and all its documents from MongoDB.
+              <span style={{ color: '#f87171' }}> This cannot be undone.</span>
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.35)', marginBottom: '0.5rem', letterSpacing: '0.1em' }}>
+            TYPE <span style={{ color: '#fff' }}>{collection}</span> TO CONFIRM
+          </div>
+          <input
+            ref={inputRef}
+            className="db-input"
+            placeholder={collection}
+            value={typed}
+            onChange={e => setTyped(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && typed === collection && !loading) onConfirm();
+              if (e.key === 'Escape') onCancel();
+            }}
+            style={{ borderColor: typed === collection ? 'rgba(248,113,113,0.5)' : undefined }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button
+            className="db-btn db-btn-danger"
+            onClick={onConfirm}
+            disabled={typed !== collection || loading}
+            style={{ flex: 1, justifyContent: 'center' }}
+          >
+            {loading
+              ? <><span className="db-spin">↻</span> DELETING…</>
+              : '✕ DELETE COLLECTION'}
+          </button>
+          <button className="db-btn db-btn-ghost" onClick={onCancel} disabled={loading}>
+            CANCEL
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -225,7 +314,6 @@ export default function DatabasePage() {
         }
         .col-pill:hover { border-color: rgba(255,255,255,0.3); color: #fff; background: rgba(255,255,255,0.04); }
         .col-pill.active { border-color: rgba(167,139,250,.5); color: #a78bfa; background: rgba(167,139,250,.08); }
-        .doc-row-expand { cursor: pointer; }
         .doc-expanded {
           background: rgba(255,255,255,0.02);
           font-family: monospace; font-size: 0.7rem;
@@ -248,6 +336,14 @@ export default function DatabasePage() {
         .search-wrap { position: relative; }
         .search-wrap svg { position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); pointer-events: none; }
         .search-wrap input { padding-left: 2.4rem !important; }
+        .del-col-btn {
+          font-family: monospace; font-size: 0.65rem; letter-spacing: 0.08em;
+          padding: 0.25rem 0.6rem; cursor: pointer;
+          border: 1px solid rgba(248,113,113,0.25);
+          background: rgba(248,113,113,0.06); color: rgba(248,113,113,0.55);
+          transition: all .15s; flex-shrink: 0;
+        }
+        .del-col-btn:hover { border-color: rgba(248,113,113,0.5); color: #f87171; background: rgba(248,113,113,0.12); }
       `}</style>
 
       <div className="db-page">
@@ -351,23 +447,28 @@ function LockScreen({
 const PAGE_SIZE = 20;
 
 function DataBrowser({ addToast }: { addToast: (m: string, t: Toast['type']) => void }) {
-  const [collections, setCollections] = useState<string[]>([]);
-  const [loadingCols, setLoadingCols] = useState(true);
-  const [activeCol,   setActiveCol]   = useState<string | null>(null);
-  const [docs,        setDocs]        = useState<Record<string, unknown>[]>([]);
-  const [total,       setTotal]       = useState(0);
-  const [page,        setPage]        = useState(1);
-  const [loadingDocs, setLoadingDocs] = useState(false);
-  const [search,      setSearch]      = useState('');
-  const [searchInput, setSearchInput] = useState('');
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
-  const [columns,     setColumns]     = useState<string[]>([]);
+  const [collections,    setCollections]    = useState<string[]>([]);
+  const [loadingCols,    setLoadingCols]    = useState(true);
+  const [activeCol,      setActiveCol]      = useState<string | null>(null);
+  const [docs,           setDocs]           = useState<Record<string, unknown>[]>([]);
+  const [total,          setTotal]          = useState(0);
+  const [page,           setPage]           = useState(1);
+  const [loadingDocs,    setLoadingDocs]    = useState(false);
+  const [search,         setSearch]         = useState('');
+  const [searchInput,    setSearchInput]    = useState('');
+  const [expandedRow,    setExpandedRow]    = useState<number | null>(null);
+  const [columns,        setColumns]        = useState<string[]>([]);
+  const [deleteTarget,   setDeleteTarget]   = useState<string | null>(null);
+  const [deletingCol,    setDeletingCol]    = useState(false);
 
-  useEffect(() => {
+  const loadCollections = () => {
+    setLoadingCols(true);
     getCollections()
       .then(cols => { setCollections(cols); setLoadingCols(false); })
       .catch(() => { addToast('Failed to load collections', 'err'); setLoadingCols(false); });
-  }, []);
+  };
+
+  useEffect(() => { loadCollections(); }, []);
 
   useEffect(() => {
     if (!activeCol) return;
@@ -379,6 +480,8 @@ function DataBrowser({ addToast }: { addToast: (m: string, t: Toast['type']) => 
         setTotal(t);
         if (d.length > 0) {
           setColumns(Object.keys(flattenDoc(d[0] as Record<string, unknown>)));
+        } else {
+          setColumns([]);
         }
       })
       .catch(() => addToast('Failed to load documents', 'err'))
@@ -391,6 +494,29 @@ function DataBrowser({ addToast }: { addToast: (m: string, t: Toast['type']) => 
   };
 
   const handleSearch = () => { setSearch(searchInput); setPage(1); };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setDeletingCol(true);
+    try {
+      await deleteCollection(deleteTarget);
+      addToast(`✓ Collection "${deleteTarget}" deleted`, 'ok');
+      // Reset active collection if it was the deleted one
+      if (activeCol === deleteTarget) {
+        setActiveCol(null);
+        setDocs([]);
+        setTotal(0);
+        setColumns([]);
+      }
+      setDeleteTarget(null);
+      loadCollections();
+    } catch (e: any) {
+      addToast(`Failed to delete: ${e.message}`, 'err');
+    } finally {
+      setDeletingCol(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   const renderPageButtons = () => {
@@ -406,124 +532,165 @@ function DataBrowser({ addToast }: { addToast: (m: string, t: Toast['type']) => 
   };
 
   return (
-    <div className="db-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <div>
-          <div className="db-card-label" style={{ marginBottom: '0.25rem' }}>DATA BROWSER</div>
-          <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'rgba(255,255,255,0.28)', margin: 0 }}>
-            Browse all collections and documents in your MongoDB database
-          </p>
-        </div>
-        {activeCol && <span className="db-badge db-badge-purple">{total.toLocaleString()} DOCUMENTS</span>}
-      </div>
+    <>
+      {deleteTarget && (
+        <DeleteCollectionModal
+          collection={deleteTarget}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteTarget(null)}
+          loading={deletingCol}
+        />
+      )}
 
-      <div>
-        <div className="db-card-label">COLLECTIONS {!loadingCols && `(${collections.length})`}</div>
-        {loadingCols ? (
-          <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)' }}>
-            <span className="db-spin">↻</span> Loading collections…
+      <div className="db-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <div className="db-card-label" style={{ marginBottom: '0.25rem' }}>DATA BROWSER</div>
+            <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'rgba(255,255,255,0.28)', margin: 0 }}>
+              Browse all collections and documents in your MongoDB database
+            </p>
           </div>
-        ) : collections.length === 0 ? (
-          <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)' }}>No collections found</div>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {collections.map(col => (
-              <button key={col} className={`col-pill ${activeCol === col ? 'active' : ''}`} onClick={() => selectCollection(col)}>
-                {col}
+          {activeCol && <span className="db-badge db-badge-purple">{total.toLocaleString()} DOCUMENTS</span>}
+        </div>
+
+        <div>
+          <div className="db-card-label">COLLECTIONS {!loadingCols && `(${collections.length})`}</div>
+          {loadingCols ? (
+            <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)' }}>
+              <span className="db-spin">↻</span> Loading collections…
+            </div>
+          ) : collections.length === 0 ? (
+            <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)' }}>No collections found</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              {collections.map(col => (
+                <div key={col} style={{ display: 'flex', alignItems: 'center', gap: '0', border: '1px solid rgba(255,255,255,0.1)', background: activeCol === col ? 'rgba(167,139,250,.08)' : 'transparent' }}>
+                  <button
+                    className={`col-pill ${activeCol === col ? 'active' : ''}`}
+                    onClick={() => selectCollection(col)}
+                    style={{ border: 'none', borderRight: '1px solid rgba(255,255,255,0.08)' }}
+                  >
+                    {col}
+                  </button>
+                  <button
+                    className="del-col-btn"
+                    onClick={e => { e.stopPropagation(); setDeleteTarget(col); }}
+                    title={`Delete collection "${col}"`}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {activeCol && (
+          <>
+            <hr className="db-hr" />
+
+            {/* Active collection header with delete button */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flex: 1, flexWrap: 'wrap' }}>
+                <div className="search-wrap" style={{ flex: 1, minWidth: 220 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                  </svg>
+                  <input className="db-input" placeholder="Search documents…" value={searchInput}
+                    onChange={e => setSearchInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                    style={{ margin: 0 }} />
+                </div>
+                <button className="db-btn db-btn-ghost db-btn-sm" onClick={handleSearch}>SEARCH</button>
+                {search && (
+                  <button className="db-btn db-btn-ghost db-btn-sm" onClick={() => { setSearch(''); setSearchInput(''); setPage(1); }}>
+                    ✕ CLEAR
+                  </button>
+                )}
+              </div>
+              <button
+                className="db-btn db-btn-danger db-btn-sm"
+                onClick={() => setDeleteTarget(activeCol)}
+                style={{ flexShrink: 0 }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6"/><path d="M14 11v6"/>
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+                DROP COLLECTION
               </button>
-            ))}
-          </div>
+            </div>
+
+            {loadingDocs ? (
+              <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)', padding: '1rem 0' }}>
+                <span className="db-spin">↻</span> Loading documents…
+              </div>
+            ) : docs.length === 0 ? (
+              <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)', padding: '1rem 0' }}>
+                No documents found{search ? ` matching "${search}"` : ''}
+              </div>
+            ) : (
+              <div className="db-table-wrap">
+                <table className="db-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 28 }}></th>
+                      {columns.map(col => <th key={col}>{col.toUpperCase()}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {docs.map((doc, i) => {
+                      const flat = flattenDoc(doc as Record<string, unknown>);
+                      const isExpanded = expandedRow === i;
+                      return [
+                        <tr key={`row-${i}`} onClick={() => setExpandedRow(isExpanded ? null : i)} style={{ cursor: 'pointer' }}>
+                          <td style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.65rem' }}>{isExpanded ? '▼' : '▶'}</td>
+                          {columns.map(col => (
+                            <td key={col} title={flat[col] ?? ''}>
+                              {flat[col] != null && flat[col] !== ''
+                                ? flat[col].length > 40 ? flat[col].slice(0, 40) + '…' : flat[col]
+                                : <span style={{ opacity: 0.25 }}>—</span>}
+                            </td>
+                          ))}
+                        </tr>,
+                        isExpanded && (
+                          <tr key={`expand-${i}`}>
+                            <td colSpan={columns.length + 1} style={{ padding: 0 }}>
+                              <div className="doc-expanded">{JSON.stringify(doc, null, 2)}</div>
+                            </td>
+                          </tr>
+                        ),
+                      ];
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button className="page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← PREV</button>
+                {renderPageButtons().map((b, i) =>
+                  b === '…'
+                    ? <span key={`e-${i}`} style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'rgba(255,255,255,0.3)', padding: '0 0.2rem' }}>…</span>
+                    : <button key={b} className={`page-btn ${page === b ? 'current' : ''}`} onClick={() => setPage(b as number)}>{b}</button>
+                )}
+                <button className="page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>NEXT →</button>
+                <span style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.25)', marginLeft: '0.5rem' }}>
+                  {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, total)} of {total.toLocaleString()}
+                </span>
+              </div>
+            )}
+
+            <div style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.2)' }}>
+              Click any row to expand the full document as JSON
+            </div>
+          </>
         )}
       </div>
-
-      {activeCol && (
-        <>
-          <hr className="db-hr" />
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <div className="search-wrap" style={{ flex: 1, minWidth: 220 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2">
-                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-              </svg>
-              <input className="db-input" placeholder="Search documents…" value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                style={{ margin: 0 }} />
-            </div>
-            <button className="db-btn db-btn-ghost db-btn-sm" onClick={handleSearch}>SEARCH</button>
-            {search && (
-              <button className="db-btn db-btn-ghost db-btn-sm" onClick={() => { setSearch(''); setSearchInput(''); setPage(1); }}>
-                ✕ CLEAR
-              </button>
-            )}
-          </div>
-
-          {loadingDocs ? (
-            <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)', padding: '1rem 0' }}>
-              <span className="db-spin">↻</span> Loading documents…
-            </div>
-          ) : docs.length === 0 ? (
-            <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)', padding: '1rem 0' }}>
-              No documents found{search ? ` matching "${search}"` : ''}
-            </div>
-          ) : (
-            <div className="db-table-wrap">
-              <table className="db-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 28 }}></th>
-                    {columns.map(col => <th key={col}>{col.toUpperCase()}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {docs.map((doc, i) => {
-                    const flat = flattenDoc(doc as Record<string, unknown>);
-                    const isExpanded = expandedRow === i;
-                    return [
-                      <tr key={`row-${i}`} onClick={() => setExpandedRow(isExpanded ? null : i)} style={{ cursor: 'pointer' }}>
-                        <td style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.65rem' }}>{isExpanded ? '▼' : '▶'}</td>
-                        {columns.map(col => (
-                          <td key={col} title={flat[col] ?? ''}>
-                            {flat[col] != null && flat[col] !== ''
-                              ? flat[col].length > 40 ? flat[col].slice(0, 40) + '…' : flat[col]
-                              : <span style={{ opacity: 0.25 }}>—</span>}
-                          </td>
-                        ))}
-                      </tr>,
-                      isExpanded && (
-                        <tr key={`expand-${i}`}>
-                          <td colSpan={columns.length + 1} style={{ padding: 0 }}>
-                            <div className="doc-expanded">{JSON.stringify(doc, null, 2)}</div>
-                          </td>
-                        </tr>
-                      ),
-                    ];
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {totalPages > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <button className="page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← PREV</button>
-              {renderPageButtons().map((b, i) =>
-                b === '…'
-                  ? <span key={`e-${i}`} style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'rgba(255,255,255,0.3)', padding: '0 0.2rem' }}>…</span>
-                  : <button key={b} className={`page-btn ${page === b ? 'current' : ''}`} onClick={() => setPage(b as number)}>{b}</button>
-              )}
-              <button className="page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>NEXT →</button>
-              <span style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.25)', marginLeft: '0.5rem' }}>
-                {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, total)} of {total.toLocaleString()}
-              </span>
-            </div>
-          )}
-
-          <div style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.2)' }}>
-            Click any row to expand the full document as JSON
-          </div>
-        </>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -547,7 +714,6 @@ function Dashboard({
   const [dragOver,       setDragOver]       = useState(false);
   const [backupFreq,     setBackupFreq]     = useState<FreqValue>('5min');
   const [backupLog,      setBackupLog]      = useState<BackupEntry[]>([]);
-  const [savingFreq,     setSavingFreq]     = useState(false);
   const [backingUp,      setBackingUp]      = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -629,23 +795,10 @@ function Dashboard({
     }
   };
 
-  // ── Save frequency → Coolify API ──────────────────────────────────────────
-  const saveFreq = async () => {
-    setSavingFreq(true);
-    try {
-      const result = await updateBackupFrequency(backupFreq);
-      if (result.ok) {
-        localStorage.setItem(BACKUP_FREQ_KEY, backupFreq);
-        const label = FREQ_OPTIONS.find(o => o.value === backupFreq)?.label ?? backupFreq;
-        addToast(`✓ Coolify cron updated: ${label}`, 'ok');
-      } else {
-        addToast(`Failed to update cron: ${result.error}`, 'err');
-      }
-    } catch (e: any) {
-      addToast(`Error: ${e.message}`, 'err');
-    } finally {
-      setSavingFreq(false);
-    }
+  const saveFreq = () => {
+    localStorage.setItem(BACKUP_FREQ_KEY, backupFreq);
+    const label = FREQ_OPTIONS.find(o => o.value === backupFreq)?.label ?? backupFreq;
+    addToast(`✓ Frequency saved locally: ${label}`, 'ok');
   };
 
   const clearImport = () => {
@@ -732,7 +885,7 @@ function Dashboard({
               {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.22)', margin: 0, lineHeight: 1.5 }}>
-              Updates the live Coolify scheduled task cron directly.
+              Saved locally — update the cron in Coolify manually to match.
               {backupFreq === 'manual' && (
                 <span style={{ color: '#facc15' }}> ⚠ Manual mode disables auto backup.</span>
               )}
@@ -742,8 +895,8 @@ function Dashboard({
             <button className="db-btn db-btn-blue" onClick={handleBackupNow} disabled={backingUp}>
               {backingUp ? <><span className="db-spin">↻</span> BACKING UP…</> : '⬡ BACKUP NOW → DRIVE'}
             </button>
-            <button className="db-btn db-btn-ghost" onClick={saveFreq} disabled={savingFreq}>
-              {savingFreq ? <><span className="db-spin">↻</span> SAVING…</> : '✓ SAVE FREQUENCY'}
+            <button className="db-btn db-btn-ghost" onClick={saveFreq}>
+              ✓ SAVE FREQUENCY
             </button>
           </div>
           {backupLog.length > 0 && (
@@ -899,7 +1052,8 @@ function Dashboard({
         <div className="db-card-label" style={{ color: 'rgba(248,113,113,0.45)' }}>NOTES</div>
         <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.32)', lineHeight: 1.8 }}>
           • Backup Now uploads to Google Drive AND downloads a local copy as a safety net.<br />
-          • Save Frequency updates the Coolify scheduled task cron directly via API.<br />
+          • Auto backup frequency is saved locally — update the Coolify scheduled task cron manually to match.<br />
+          • Drop Collection permanently deletes the collection and all its documents — requires typing the name to confirm.<br />
           • Import uses <code style={{ color: 'rgba(255,255,255,0.6)' }}>bulkWrite</code> with <code style={{ color: 'rgba(255,255,255,0.6)' }}>upsert: true</code> — existing records are updated, nothing is deleted.<br />
           • <code style={{ color: 'rgba(255,255,255,0.6)' }}>createdAt</code> is never overwritten on existing documents (<code style={{ color: 'rgba(255,255,255,0.6)' }}>$setOnInsert</code>).<br />
           • Backup log is stored in <code style={{ color: 'rgba(255,255,255,0.6)' }}>localStorage</code> — device-specific.

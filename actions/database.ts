@@ -281,3 +281,16 @@ export async function getCollectionDocuments(
     throw new Error('Failed to fetch documents');
   }
 }
+
+// ── Drop an entire collection ─────────────────────────────────────────────────
+export async function deleteCollection(collectionName: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.dropCollection(collectionName);
+  } catch (error) {
+    console.error('Error dropping collection:', error);
+    throw new Error(
+      error instanceof Error ? error.message : 'Failed to delete collection'
+    );
+  }
+}
