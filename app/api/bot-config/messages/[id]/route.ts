@@ -1,7 +1,7 @@
 /**
- * app/api/bot-config/messages/route.ts
- * GET  — list all scheduled messages
- * POST — create a new scheduled message
+ * app/api/bot-config/messages/[id]/route.ts
+ * PATCH  — toggle active / update fields
+ * DELETE — remove a scheduled message
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,66 +20,65 @@ async function authenticate() {
   try { return verifyToken(token); } catch { return null; }
 }
 
-export async function GET() {
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const user = await authenticate();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const { id } = await params;
+  if (!ObjectId.isValid(id)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+
   try {
-    const client = await clientPromise;
-    const messages = await client
+    const body    = await req.json();
+    const client  = await clientPromise;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const $set: Record<string, any> = { updatedAt: new Date() };
+    if (typeof body.active         !== 'undefined') $set.active         = body.active;
+    if (typeof body.name           !== 'undefined') $set.name           = body.name;
+    if (typeof body.content        !== 'undefined') $set.content        = body.content;
+    if (typeof body.embedTitle     !== 'undefined') $set.embedTitle     = body.embedTitle;
+    if (typeof body.embedColor     !== 'undefined') $set.embedColor     = body.embedColor;
+    if (typeof body.channelId      !== 'undefined') $set.channelId      = body.channelId;
+    if (typeof body.cronExpression !== 'undefined') $set.cronExpression = body.cronExpression;
+
+    const result = await client
       .db(DB_NAME)
       .collection(COLL)
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+      .updateOne({ _id: new ObjectId(id) }, { $set });
 
-    return NextResponse.json({ messages });
+    if (result.matchedCount === 0)
+      return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const user = await authenticate();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const { id } = await params;
+  if (!ObjectId.isValid(id)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+
   try {
-    const body = await req.json();
-    const { name, channelId, content, embedTitle, embedColor, scheduleType, cronExpression, sendAt, messageFormat } = body;
-
-    // Validate required fields
-    if (!name?.trim())      return NextResponse.json({ error: 'Name is required' },       { status: 400 });
-    if (!channelId?.trim()) return NextResponse.json({ error: 'Channel ID is required' }, { status: 400 });
-    if (!content?.trim() && !embedTitle?.trim())
-      return NextResponse.json({ error: 'Message content is required' }, { status: 400 });
-    if (scheduleType === 'recurring' && !cronExpression?.trim())
-      return NextResponse.json({ error: 'Cron expression is required for recurring messages' }, { status: 400 });
-    if (scheduleType === 'once' && !sendAt)
-      return NextResponse.json({ error: 'Send time is required for one-time messages' }, { status: 400 });
-
-    const doc = {
-      _id:           new ObjectId(),
-      name:          name.trim(),
-      channelId:     channelId.trim(),
-      messageFormat: messageFormat ?? 'plain',   // 'plain' | 'embed'
-      content:       content?.trim() ?? '',
-      embedTitle:    embedTitle?.trim() ?? '',
-      embedColor:    embedColor ?? '#FF6B35',
-      scheduleType,                               // 'once' | 'recurring'
-      cronExpression: scheduleType === 'recurring' ? cronExpression.trim() : null,
-      sendAt:         scheduleType === 'once' ? new Date(sendAt) : null,
-      active:        true,
-      sent:          false,                       // for once-type: has it fired?
-      sentCount:     0,
-      lastSentAt:    null,
-      createdAt:     new Date(),
-      createdBy:     (user as { email?: string }).email ?? 'unknown',
-    };
-
     const client = await clientPromise;
-    await client.db(DB_NAME).collection(COLL).insertOne(doc);
+    const result = await client
+      .db(DB_NAME)
+      .collection(COLL)
+      .deleteOne({ _id: new ObjectId(id) });
 
-    return NextResponse.json({ success: true, message: 'Scheduled message created', id: doc._id });
+    if (result.deletedCount === 0)
+      return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
