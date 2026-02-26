@@ -20,9 +20,14 @@ type ParticipantDocument = Omit<DBParticipant, '_id'> & {
 };
 
 async function getCollection() {
-  const client = await getClient();   // ← getClient() instead of clientPromise
+  const client = await getClient();
   const db = client.db(DB_NAME);
   return db.collection<ParticipantDocument>(COLLECTION_NAME);
+}
+
+async function getDb() {
+  const client = await getClient();
+  return client.db(DB_NAME);
 }
 
 const escapeCell = (v: unknown): string => {
@@ -207,5 +212,72 @@ export async function getDbStats(): Promise<DbStats> {
   } catch (error) {
     console.error('Error fetching DB stats:', error);
     throw new Error('Failed to fetch database stats');
+  }
+}
+
+// ── Data Browser — list all collections ──────────────────────────────────────
+export async function getCollections(): Promise<string[]> {
+  try {
+    const db = await getDb();
+    const collections = await db.listCollections().toArray();
+    return collections.map(c => c.name).sort();
+  } catch (error) {
+    console.error('Error listing collections:', error);
+    throw new Error('Failed to list collections');
+  }
+}
+
+// ── Data Browser — paginated documents with optional search ──────────────────
+export async function getCollectionDocuments(
+  collectionName: string,
+  page = 1,
+  pageSize = 20,
+  search = ''
+): Promise<{ docs: Record<string, unknown>[]; total: number }> {
+  try {
+    const db = await getDb();
+    const col = db.collection(collectionName);
+
+    let query: Record<string, unknown> = {};
+
+    if (search.trim()) {
+      // Build a regex OR across all top-level string fields from a sample doc
+      const sample = await col.findOne({});
+      if (sample) {
+        const stringFields = Object.entries(sample)
+          .filter(([k, v]) => typeof v === 'string' && k !== '_id')
+          .map(([k]) => k);
+        if (stringFields.length > 0) {
+          query = {
+            $or: stringFields.map(f => ({
+              [f]: { $regex: search.trim(), $options: 'i' },
+            })),
+          };
+        }
+      }
+    }
+
+    const [rawDocs, total] = await Promise.all([
+      col.find(query).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+      col.countDocuments(query),
+    ]);
+
+    // Serialize: convert ObjectId → string, Date → ISO string
+    const docs = rawDocs.map(doc =>
+      JSON.parse(
+        JSON.stringify(doc, (_key, val) => {
+          if (val && typeof val === 'object' && val.constructor?.name === 'ObjectId') {
+            return val.toString();
+          }
+          if (val instanceof Date) return val.toISOString();
+          return val;
+        })
+      )
+    );
+
+    return { docs, total };
+  } catch (error) {
+    console.error('Error fetching collection documents:', error);
+    throw new Error('Failed to fetch documents');
   }
 }

@@ -6,13 +6,16 @@ import {
   exportDatabaseAsCSV,
   upsertParticipantsFromCSV,
   getDbStats,
+  getCollections,
+  getCollectionDocuments,
   type DbStats,
   type ImportResult,
 } from '@/actions/database';
 import { backupToDrive, type BackupResult } from '@/actions/backup';
+import { updateBackupFrequency } from '@/actions/coolify';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types/Users/observer/Desktop/Projects/Hackoverflow-Dashboard/app/(dashboard)/dashboard/database/page.tsx
+// Types
 // ─────────────────────────────────────────────────────────────────────────────
 type View  = 'lock' | 'dashboard';
 type Toast = { id: number; msg: string; type: 'ok' | 'err' | 'info' };
@@ -51,7 +54,6 @@ function tsFilename() {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
-/** Minimal CSV parser that handles double-quote escaping */
 function parseCSV(text: string): string[][] {
   return text.trim().split('\n').map(line => {
     const cells: string[] = [];
@@ -70,6 +72,21 @@ function parseCSV(text: string): string[][] {
     cells.push(cur);
     return cells;
   });
+}
+
+function flattenDoc(doc: Record<string, unknown>, prefix = ''): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(doc)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      Object.assign(result, flattenDoc(v as Record<string, unknown>, key));
+    } else if (Array.isArray(v)) {
+      result[key] = JSON.stringify(v);
+    } else {
+      result[key] = v == null ? '' : String(v);
+    }
+  }
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,6 +142,9 @@ export default function DatabasePage() {
         .db-btn-green:not(:disabled):hover  { background: rgba(74,222,128,.2); }
         .db-btn-blue   { background: rgba(96,165,250,.1); border: 1px solid rgba(96,165,250,.4); color: #60a5fa; }
         .db-btn-blue:not(:disabled):hover   { background: rgba(96,165,250,.2); }
+        .db-btn-purple { background: rgba(167,139,250,.1); border: 1px solid rgba(167,139,250,.4); color: #a78bfa; }
+        .db-btn-purple:not(:disabled):hover { background: rgba(167,139,250,.2); }
+        .db-btn-sm { padding: 0.45rem 0.75rem; font-size: 0.72rem; }
         .db-input {
           background: transparent; border: 1px solid rgba(255,255,255,0.14);
           color: #fff; font-family: monospace; font-size: 0.875rem;
@@ -147,17 +167,20 @@ export default function DatabasePage() {
         }
         .db-drop:hover, .db-drop.over { border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.02); }
         .db-drop.loaded { border-color: rgba(74,222,128,.45); background: rgba(74,222,128,.03); }
-        .db-table-wrap { overflow-x: auto; max-height: 220px; overflow-y: auto; }
+        .db-table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
         .db-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.72rem; }
         .db-table th {
           color: rgba(255,255,255,0.3); text-align: left; padding: 0.35rem 0.7rem;
           border-bottom: 1px solid rgba(255,255,255,0.07); white-space: nowrap; letter-spacing: 0.09em;
+          position: sticky; top: 0; background: #0a0a0a; z-index: 1;
         }
         .db-table td {
           padding: 0.35rem 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.68); white-space: nowrap;
+          color: rgba(255,255,255,0.68); white-space: nowrap; max-width: 260px;
+          overflow: hidden; text-overflow: ellipsis;
         }
         .db-table tr:last-child td { border-bottom: none; }
+        .db-table tr:hover td { background: rgba(255,255,255,0.02); }
         .db-bar-track { background: rgba(255,255,255,0.07); height: 2px; }
         .db-bar-fill  { height: 2px; background: #fff; transition: width .25s; }
         .db-hr { border: none; border-top: 1px solid rgba(255,255,255,0.07); }
@@ -169,6 +192,7 @@ export default function DatabasePage() {
         .db-badge-yellow { border-color: rgba(250,204,21,.4); color: #facc15; background: rgba(250,204,21,.07); }
         .db-badge-red    { border-color: rgba(248,113,113,.4); color: #f87171; background: rgba(248,113,113,.07); }
         .db-badge-blue   { border-color: rgba(96,165,250,.4); color: #60a5fa; background: rgba(96,165,250,.07); }
+        .db-badge-purple { border-color: rgba(167,139,250,.4); color: #a78bfa; background: rgba(167,139,250,.07); }
         .db-toasts {
           position: fixed; bottom: 1.5rem; right: 1.5rem;
           display: flex; flex-direction: column; gap: 0.5rem; z-index: 9999;
@@ -194,6 +218,36 @@ export default function DatabasePage() {
         .drive-link:hover { text-decoration: underline; }
         @keyframes db-spin { to { transform: rotate(360deg); } }
         .db-spin { animation: db-spin 1s linear infinite; display: inline-block; }
+        .col-pill {
+          font-family: monospace; font-size: 0.75rem; padding: 0.4rem 0.85rem;
+          border: 1px solid rgba(255,255,255,0.1); cursor: pointer;
+          transition: all .15s; background: transparent; color: rgba(255,255,255,0.55);
+        }
+        .col-pill:hover { border-color: rgba(255,255,255,0.3); color: #fff; background: rgba(255,255,255,0.04); }
+        .col-pill.active { border-color: rgba(167,139,250,.5); color: #a78bfa; background: rgba(167,139,250,.08); }
+        .doc-row-expand { cursor: pointer; }
+        .doc-expanded {
+          background: rgba(255,255,255,0.02);
+          font-family: monospace; font-size: 0.7rem;
+          color: rgba(255,255,255,0.5);
+          padding: 0.5rem 0.7rem;
+          white-space: pre-wrap;
+          word-break: break-all;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .page-btn {
+          font-family: monospace; font-size: 0.72rem;
+          padding: 0.3rem 0.65rem; cursor: pointer;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: transparent; color: rgba(255,255,255,0.5);
+          transition: all .15s;
+        }
+        .page-btn:hover:not(:disabled) { border-color: rgba(255,255,255,0.3); color: #fff; }
+        .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .page-btn.current { border-color: rgba(167,139,250,.5); color: #a78bfa; background: rgba(167,139,250,.08); }
+        .search-wrap { position: relative; }
+        .search-wrap svg { position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); pointer-events: none; }
+        .search-wrap input { padding-left: 2.4rem !important; }
       `}</style>
 
       <div className="db-page">
@@ -292,6 +346,188 @@ function LockScreen({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Data Browser
+// ─────────────────────────────────────────────────────────────────────────────
+const PAGE_SIZE = 20;
+
+function DataBrowser({ addToast }: { addToast: (m: string, t: Toast['type']) => void }) {
+  const [collections, setCollections] = useState<string[]>([]);
+  const [loadingCols, setLoadingCols] = useState(true);
+  const [activeCol,   setActiveCol]   = useState<string | null>(null);
+  const [docs,        setDocs]        = useState<Record<string, unknown>[]>([]);
+  const [total,       setTotal]       = useState(0);
+  const [page,        setPage]        = useState(1);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [search,      setSearch]      = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [columns,     setColumns]     = useState<string[]>([]);
+
+  useEffect(() => {
+    getCollections()
+      .then(cols => { setCollections(cols); setLoadingCols(false); })
+      .catch(() => { addToast('Failed to load collections', 'err'); setLoadingCols(false); });
+  }, []);
+
+  useEffect(() => {
+    if (!activeCol) return;
+    setLoadingDocs(true);
+    setExpandedRow(null);
+    getCollectionDocuments(activeCol, page, PAGE_SIZE, search)
+      .then(({ docs: d, total: t }) => {
+        setDocs(d);
+        setTotal(t);
+        if (d.length > 0) {
+          setColumns(Object.keys(flattenDoc(d[0] as Record<string, unknown>)));
+        }
+      })
+      .catch(() => addToast('Failed to load documents', 'err'))
+      .finally(() => setLoadingDocs(false));
+  }, [activeCol, page, search]);
+
+  const selectCollection = (col: string) => {
+    setActiveCol(col); setPage(1); setSearch(''); setSearchInput('');
+    setExpandedRow(null); setDocs([]);
+  };
+
+  const handleSearch = () => { setSearch(searchInput); setPage(1); };
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const renderPageButtons = () => {
+    const btns: (number | string)[] = [];
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+        btns.push(i);
+      } else if (btns[btns.length - 1] !== '…') {
+        btns.push('…');
+      }
+    }
+    return btns;
+  };
+
+  return (
+    <div className="db-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div>
+          <div className="db-card-label" style={{ marginBottom: '0.25rem' }}>DATA BROWSER</div>
+          <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'rgba(255,255,255,0.28)', margin: 0 }}>
+            Browse all collections and documents in your MongoDB database
+          </p>
+        </div>
+        {activeCol && <span className="db-badge db-badge-purple">{total.toLocaleString()} DOCUMENTS</span>}
+      </div>
+
+      <div>
+        <div className="db-card-label">COLLECTIONS {!loadingCols && `(${collections.length})`}</div>
+        {loadingCols ? (
+          <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)' }}>
+            <span className="db-spin">↻</span> Loading collections…
+          </div>
+        ) : collections.length === 0 ? (
+          <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)' }}>No collections found</div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            {collections.map(col => (
+              <button key={col} className={`col-pill ${activeCol === col ? 'active' : ''}`} onClick={() => selectCollection(col)}>
+                {col}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {activeCol && (
+        <>
+          <hr className="db-hr" />
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="search-wrap" style={{ flex: 1, minWidth: 220 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input className="db-input" placeholder="Search documents…" value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                style={{ margin: 0 }} />
+            </div>
+            <button className="db-btn db-btn-ghost db-btn-sm" onClick={handleSearch}>SEARCH</button>
+            {search && (
+              <button className="db-btn db-btn-ghost db-btn-sm" onClick={() => { setSearch(''); setSearchInput(''); setPage(1); }}>
+                ✕ CLEAR
+              </button>
+            )}
+          </div>
+
+          {loadingDocs ? (
+            <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)', padding: '1rem 0' }}>
+              <span className="db-spin">↻</span> Loading documents…
+            </div>
+          ) : docs.length === 0 ? (
+            <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.3)', padding: '1rem 0' }}>
+              No documents found{search ? ` matching "${search}"` : ''}
+            </div>
+          ) : (
+            <div className="db-table-wrap">
+              <table className="db-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 28 }}></th>
+                    {columns.map(col => <th key={col}>{col.toUpperCase()}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {docs.map((doc, i) => {
+                    const flat = flattenDoc(doc as Record<string, unknown>);
+                    const isExpanded = expandedRow === i;
+                    return [
+                      <tr key={`row-${i}`} onClick={() => setExpandedRow(isExpanded ? null : i)} style={{ cursor: 'pointer' }}>
+                        <td style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.65rem' }}>{isExpanded ? '▼' : '▶'}</td>
+                        {columns.map(col => (
+                          <td key={col} title={flat[col] ?? ''}>
+                            {flat[col] != null && flat[col] !== ''
+                              ? flat[col].length > 40 ? flat[col].slice(0, 40) + '…' : flat[col]
+                              : <span style={{ opacity: 0.25 }}>—</span>}
+                          </td>
+                        ))}
+                      </tr>,
+                      isExpanded && (
+                        <tr key={`expand-${i}`}>
+                          <td colSpan={columns.length + 1} style={{ padding: 0 }}>
+                            <div className="doc-expanded">{JSON.stringify(doc, null, 2)}</div>
+                          </td>
+                        </tr>
+                      ),
+                    ];
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button className="page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← PREV</button>
+              {renderPageButtons().map((b, i) =>
+                b === '…'
+                  ? <span key={`e-${i}`} style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'rgba(255,255,255,0.3)', padding: '0 0.2rem' }}>…</span>
+                  : <button key={b} className={`page-btn ${page === b ? 'current' : ''}`} onClick={() => setPage(b as number)}>{b}</button>
+              )}
+              <button className="page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>NEXT →</button>
+              <span style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.25)', marginLeft: '0.5rem' }}>
+                {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, total)} of {total.toLocaleString()}
+              </span>
+            </div>
+          )}
+
+          <div style={{ fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.2)' }}>
+            Click any row to expand the full document as JSON
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 function Dashboard({
@@ -309,7 +545,7 @@ function Dashboard({
   const [importResult,   setImportResult]   = useState<ImportResult | null>(null);
   const [loadingImport,  setLoadingImport]  = useState(false);
   const [dragOver,       setDragOver]       = useState(false);
-  const [backupFreq,     setBackupFreq]     = useState<FreqValue>('10min');
+  const [backupFreq,     setBackupFreq]     = useState<FreqValue>('5min');
   const [backupLog,      setBackupLog]      = useState<BackupEntry[]>([]);
   const [savingFreq,     setSavingFreq]     = useState(false);
   const [backingUp,      setBackingUp]      = useState(false);
@@ -325,7 +561,6 @@ function Dashboard({
     } catch {}
   }, []);
 
-  // ── Export ──────────────────────────────────────────────────────────────────
   const handleExport = async () => {
     setLoadingExport(true);
     try {
@@ -339,22 +574,15 @@ function Dashboard({
     }
   };
 
-  // ── File load ───────────────────────────────────────────────────────────────
   const loadFile = (file: File) => {
-    if (!file.name.endsWith('.csv')) {
-      addToast('Please select a .csv file', 'err'); return;
-    }
+    if (!file.name.endsWith('.csv')) { addToast('Please select a .csv file', 'err'); return; }
     setImportFile(file);
     setImportResult(null);
     const reader = new FileReader();
-    reader.onload = e => {
-      const rows = parseCSV(e.target?.result as string);
-      setImportPreview(rows.slice(0, 6));
-    };
+    reader.onload = e => setImportPreview(parseCSV(e.target?.result as string).slice(0, 6));
     reader.readAsText(file);
   };
 
-  // ── Import ──────────────────────────────────────────────────────────────────
   const handleImport = async () => {
     if (!importFile) return;
     setLoadingImport(true);
@@ -364,10 +592,7 @@ function Dashboard({
       const text = await importFile.text();
       const [headerRow, ...dataRows] = parseCSV(text);
       let pct = 5;
-      const ticker = setInterval(() => {
-        pct = Math.min(pct + 4, 88);
-        setImportProgress(pct);
-      }, 120);
+      const ticker = setInterval(() => { pct = Math.min(pct + 4, 88); setImportProgress(pct); }, 120);
       const result = await upsertParticipantsFromCSV(headerRow, dataRows);
       clearInterval(ticker);
       setImportProgress(100);
@@ -385,27 +610,17 @@ function Dashboard({
     }
   };
 
-  // ── Backup to Drive ──────────────────────────────────────────────────────────
   const handleBackupNow = async () => {
     setBackingUp(true);
     addToast('Uploading backup to Google Drive…', 'info');
     try {
       const result: BackupResult = await backupToDrive();
-
-      // Also download locally as a safety copy
       const { csv } = await exportDatabaseAsCSV();
       downloadBlob(csv, result.filename);
-
-      const entry: BackupEntry = {
-        time:     result.time,
-        count:    result.count,
-        driveUrl: result.driveUrl,
-        source:   'manual',
-      };
+      const entry: BackupEntry = { time: result.time, count: result.count, driveUrl: result.driveUrl, source: 'manual' };
       const updated = [entry, ...backupLog].slice(0, 12);
       setBackupLog(updated);
       localStorage.setItem(BACKUP_LOG_KEY, JSON.stringify(updated));
-
       addToast(`✓ Backed up ${result.count} records to Drive`, 'ok');
     } catch (e: any) {
       addToast(`Backup failed: ${e.message}`, 'err');
@@ -414,21 +629,27 @@ function Dashboard({
     }
   };
 
-  // ── Save frequency preference ────────────────────────────────────────────────
-  const saveFreq = () => {
+  // ── Save frequency → Coolify API ──────────────────────────────────────────
+  const saveFreq = async () => {
     setSavingFreq(true);
-    localStorage.setItem(BACKUP_FREQ_KEY, backupFreq);
-    setTimeout(() => setSavingFreq(false), 600);
-    const label = FREQ_OPTIONS.find(o => o.value === backupFreq)?.label ?? backupFreq;
-    addToast(`Backup frequency set to: ${label}`, 'ok');
+    try {
+      const result = await updateBackupFrequency(backupFreq);
+      if (result.ok) {
+        localStorage.setItem(BACKUP_FREQ_KEY, backupFreq);
+        const label = FREQ_OPTIONS.find(o => o.value === backupFreq)?.label ?? backupFreq;
+        addToast(`✓ Coolify cron updated: ${label}`, 'ok');
+      } else {
+        addToast(`Failed to update cron: ${result.error}`, 'err');
+      }
+    } catch (e: any) {
+      addToast(`Error: ${e.message}`, 'err');
+    } finally {
+      setSavingFreq(false);
+    }
   };
 
-  // ── Clear import ─────────────────────────────────────────────────────────────
   const clearImport = () => {
-    setImportFile(null);
-    setImportPreview([]);
-    setImportProgress(0);
-    setImportResult(null);
+    setImportFile(null); setImportPreview([]); setImportProgress(0); setImportResult(null);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -444,14 +665,13 @@ function Dashboard({
             DATABASE
           </h1>
           <p style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'rgba(255,255,255,0.35)' }}>
-            Export · Import · Backup — MongoDB participants collection
+            Browse · Export · Import · Backup — MongoDB
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="db-badge db-badge-green">● MONGODB CONNECTED</span>
           <span className="db-badge db-badge-blue">⬡ DRIVE BACKUP ACTIVE</span>
-          <button className="db-btn db-btn-ghost" onClick={onLock}
-            style={{ padding: '0.5rem 0.9rem', fontSize: '0.75rem' }}>
+          <button className="db-btn db-btn-ghost" onClick={onLock} style={{ padding: '0.5rem 0.9rem', fontSize: '0.75rem' }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="11" width="18" height="11" rx="2"/>
               <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
@@ -471,12 +691,13 @@ function Dashboard({
         ].map(s => (
           <div key={s.label} className="db-stat">
             <div className="db-stat-label">{s.label}</div>
-            <div className="db-stat-value" style={{ color: s.color }}>
-              {s.value != null ? s.value : '—'}
-            </div>
+            <div className="db-stat-value" style={{ color: s.color }}>{s.value != null ? s.value : '—'}</div>
           </div>
         ))}
       </div>
+
+      {/* ── DATA BROWSER ── */}
+      <DataBrowser addToast={addToast} />
 
       <div className="db-grid-2">
 
@@ -484,8 +705,7 @@ function Dashboard({
         <div className="db-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div className="db-card-label">EXPORT DATABASE</div>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none"
-              stroke="rgba(255,255,255,0.18)" strokeWidth="1.2" style={{ flexShrink: 0, marginTop: 2 }}>
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth="1.2" style={{ flexShrink: 0, marginTop: 2 }}>
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
@@ -506,33 +726,26 @@ function Dashboard({
         {/* ── Backup card ── */}
         <div className="db-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div className="db-card-label">GOOGLE DRIVE BACKUP</div>
-
-          {/* Frequency selector */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
             <div className="db-card-label" style={{ marginBottom: 0 }}>AUTO BACKUP FREQUENCY</div>
-            <select className="db-select" value={backupFreq}
-              onChange={e => setBackupFreq(e.target.value as FreqValue)}>
-              {FREQ_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
+            <select className="db-select" value={backupFreq} onChange={e => setBackupFreq(e.target.value as FreqValue)}>
+              {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.22)', margin: 0, lineHeight: 1.5 }}>
-              Minimum GitHub Actions cron interval is 5 min. Update <code style={{ color: 'rgba(255,255,255,0.5)' }}>backup.yml</code> after saving.
+              Updates the live Coolify scheduled task cron directly.
+              {backupFreq === 'manual' && (
+                <span style={{ color: '#facc15' }}> ⚠ Manual mode disables auto backup.</span>
+              )}
             </p>
           </div>
-
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             <button className="db-btn db-btn-blue" onClick={handleBackupNow} disabled={backingUp}>
-              {backingUp
-                ? <><span className="db-spin">↻</span> BACKING UP…</>
-                : '⬡ BACKUP NOW → DRIVE'}
+              {backingUp ? <><span className="db-spin">↻</span> BACKING UP…</> : '⬡ BACKUP NOW → DRIVE'}
             </button>
             <button className="db-btn db-btn-ghost" onClick={saveFreq} disabled={savingFreq}>
-              {savingFreq ? '✓ SAVED' : '✓ SAVE FREQUENCY'}
+              {savingFreq ? <><span className="db-spin">↻</span> SAVING…</> : '✓ SAVE FREQUENCY'}
             </button>
           </div>
-
-          {/* Recent backups log */}
           {backupLog.length > 0 && (
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '0.9rem' }}>
               <div className="db-card-label" style={{ marginBottom: '0.6rem' }}>RECENT BACKUPS</div>
@@ -546,9 +759,7 @@ function Dashboard({
                     border: '1px solid rgba(255,255,255,0.05)',
                     gap: '0.5rem', flexWrap: 'wrap',
                   }}>
-                    <span style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      {new Date(b.time).toLocaleString()}
-                    </span>
+                    <span style={{ color: 'rgba(255,255,255,0.4)' }}>{new Date(b.time).toLocaleString()}</span>
                     <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                       <span style={{ color: '#4ade80' }}>{b.count} rec</span>
                       {b.driveUrl && (
@@ -567,7 +778,6 @@ function Dashboard({
               </div>
             </div>
           )}
-
           {lastBackup && (
             <div style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.28)' }}>
               Last backup: {new Date(lastBackup.time).toLocaleString()}
@@ -585,8 +795,6 @@ function Dashboard({
           <div className="db-card-label" style={{ marginBottom: 0 }}>IMPORT / RESTORE DATABASE</div>
           <span className="db-badge db-badge-yellow">⚠ UPSERTS BY participantId</span>
         </div>
-
-        {/* Drop zone */}
         <div
           className={`db-drop ${dragOver ? 'over' : ''} ${importFile ? 'loaded' : ''}`}
           onClick={() => fileRef.current?.click()}
@@ -602,9 +810,7 @@ function Dashboard({
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14 2 14 8 20 8"/>
               </svg>
-              <div style={{ fontFamily: 'monospace', fontSize: '0.875rem', color: '#4ade80', fontWeight: 700 }}>
-                {importFile.name}
-              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: '0.875rem', color: '#4ade80', fontWeight: 700 }}>{importFile.name}</div>
               <div style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'rgba(255,255,255,0.3)' }}>
                 {(importFile.size / 1024).toFixed(1)} KB · Click to change
               </div>
@@ -625,29 +831,21 @@ function Dashboard({
             </>
           )}
         </div>
-
         {importPreview.length > 0 && (
           <div>
             <div className="db-card-label">PREVIEW — first {importPreview.length - 1} rows</div>
             <div className="db-table-wrap">
               <table className="db-table">
-                <thead>
-                  <tr>{importPreview[0].map((h, i) => <th key={i}>{h || '—'}</th>)}</tr>
-                </thead>
+                <thead><tr>{importPreview[0].map((h, i) => <th key={i}>{h || '—'}</th>)}</tr></thead>
                 <tbody>
                   {importPreview.slice(1).map((row, ri) => (
-                    <tr key={ri}>
-                      {row.map((cell, ci) => (
-                        <td key={ci}>{cell || <span style={{ opacity: 0.3 }}>—</span>}</td>
-                      ))}
-                    </tr>
+                    <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{cell || <span style={{ opacity: 0.3 }}>—</span>}</td>)}</tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
-
         {importProgress > 0 && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: '0.68rem', color: 'rgba(255,255,255,0.35)', marginBottom: '0.4rem' }}>
@@ -655,27 +853,24 @@ function Dashboard({
               <span>{importProgress}%</span>
             </div>
             <div className="db-bar-track">
-              <div className="db-bar-fill" style={{ width: `${importProgress}%`,
-                background: importProgress === 100 ? '#4ade80' : '#fff' }} />
+              <div className="db-bar-fill" style={{ width: `${importProgress}%`, background: importProgress === 100 ? '#4ade80' : '#fff' }} />
             </div>
           </div>
         )}
-
         {importResult && (
           <div style={{
             border: `1px solid ${importResult.errors.length ? 'rgba(250,204,21,.3)' : 'rgba(74,222,128,.3)'}`,
             background: importResult.errors.length ? 'rgba(250,204,21,.05)' : 'rgba(74,222,128,.05)',
             padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem',
           }}>
-            <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700,
-              color: importResult.errors.length ? '#facc15' : '#4ade80' }}>
+            <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700, color: importResult.errors.length ? '#facc15' : '#4ade80' }}>
               IMPORT COMPLETE
             </div>
             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
               {[
-                { label: 'INSERTED', value: importResult.upserted,      color: '#4ade80' },
-                { label: 'UPDATED',  value: importResult.modified,       color: '#fff' },
-                { label: 'SKIPPED',  value: importResult.errors.length,  color: '#f87171' },
+                { label: 'INSERTED', value: importResult.upserted,     color: '#4ade80' },
+                { label: 'UPDATED',  value: importResult.modified,      color: '#fff' },
+                { label: 'SKIPPED',  value: importResult.errors.length, color: '#f87171' },
               ].map(s => (
                 <div key={s.label}>
                   <div className="db-card-label" style={{ marginBottom: '0.2rem' }}>{s.label}</div>
@@ -691,15 +886,11 @@ function Dashboard({
             )}
           </div>
         )}
-
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <button className="db-btn db-btn-danger" onClick={handleImport}
-            disabled={!importFile || loadingImport}>
+          <button className="db-btn db-btn-danger" onClick={handleImport} disabled={!importFile || loadingImport}>
             {loadingImport ? '↻ IMPORTING…' : '↑ IMPORT & UPSERT INTO MONGODB'}
           </button>
-          {importFile && (
-            <button className="db-btn db-btn-ghost" onClick={clearImport}>✕ CLEAR</button>
-          )}
+          {importFile && <button className="db-btn db-btn-ghost" onClick={clearImport}>✕ CLEAR</button>}
         </div>
       </div>
 
@@ -708,7 +899,7 @@ function Dashboard({
         <div className="db-card-label" style={{ color: 'rgba(248,113,113,0.45)' }}>NOTES</div>
         <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'rgba(255,255,255,0.32)', lineHeight: 1.8 }}>
           • Backup Now uploads to Google Drive AND downloads a local copy as a safety net.<br />
-          • Auto backup via GitHub Actions cron — update <code style={{ color: 'rgba(255,255,255,0.6)' }}>backup.yml</code> to match chosen frequency.<br />
+          • Save Frequency updates the Coolify scheduled task cron directly via API.<br />
           • Import uses <code style={{ color: 'rgba(255,255,255,0.6)' }}>bulkWrite</code> with <code style={{ color: 'rgba(255,255,255,0.6)' }}>upsert: true</code> — existing records are updated, nothing is deleted.<br />
           • <code style={{ color: 'rgba(255,255,255,0.6)' }}>createdAt</code> is never overwritten on existing documents (<code style={{ color: 'rgba(255,255,255,0.6)' }}>$setOnInsert</code>).<br />
           • Backup log is stored in <code style={{ color: 'rgba(255,255,255,0.6)' }}>localStorage</code> — device-specific.
