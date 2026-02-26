@@ -1,13 +1,13 @@
 'use server';
 
-import clientPromise from '@/lib/mongodb';
+import { getClient } from '@/lib/mongodb';
 import { DBParticipant } from '@/types';
 import { ObjectId } from 'mongodb';
 
 const DB_NAME = 'hackoverflow';
 const COLLECTION_NAME = 'participants';
 
-// ── Password ──────────────────────────────────────────────────────────────────/Users/observer/Desktop/Projects/Hackoverflow-Dashboard/actions/database.ts
+// ── Password ──────────────────────────────────────────────────────────────────
 const DB_PASSWORD = process.env.DB_PAGE_PASSWORD ?? 'hackoverflow-db-2024';
 
 export async function verifyDbPassword(password: string): Promise<boolean> {
@@ -20,7 +20,7 @@ type ParticipantDocument = Omit<DBParticipant, '_id'> & {
 };
 
 async function getCollection() {
-  const client = await clientPromise;
+  const client = await getClient();   // ← getClient() instead of clientPromise
   const db = client.db(DB_NAME);
   return db.collection<ParticipantDocument>(COLLECTION_NAME);
 }
@@ -33,8 +33,6 @@ const escapeCell = (v: unknown): string => {
     : s;
 };
 
-// ── CSV column contract (export & import share this exact order) ──────────────
-// NOTE: not exported — 'use server' files can only export async functions
 const CSV_HEADERS = [
   'participantId',
   'name',
@@ -164,7 +162,6 @@ export async function upsertParticipantsFromCSV(
             filter: { participantId },
             update: {
               $set: doc,
-              // Preserve original createdAt — only set on first insert
               $setOnInsert: { createdAt: doc.createdAt },
             },
             upsert: true,
@@ -212,4 +209,3 @@ export async function getDbStats(): Promise<DbStats> {
     throw new Error('Failed to fetch database stats');
   }
 }
-

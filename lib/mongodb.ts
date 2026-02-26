@@ -5,26 +5,49 @@ if (!process.env.MONGODB_URI) {
 }
 
 const uri = process.env.MONGODB_URI;
-const options = {};
 
-let client: MongoClient;
-let clientPromise: Promise<MongoClient>;
+let _client: MongoClient | null = null;
 
-if (process.env.NODE_ENV === 'development') {
-  // In development, use a global variable to preserve the connection
-  let globalWithMongo = global as typeof globalThis & {
-    _mongoClientPromise?: Promise<MongoClient>;
-  };
+async function createClient(): Promise<MongoClient> {
+  const client = new MongoClient(uri, {
+    serverSelectionTimeoutMS: 10_000,
+    connectTimeoutMS:         10_000,
+    socketTimeoutMS:          45_000,
+    maxPoolSize:              5,
+  });
+  await client.connect();
 
-  if (!globalWithMongo._mongoClientPromise) {
-    client = new MongoClient(uri, options);
-    globalWithMongo._mongoClientPromise = client.connect();
-  }
-  clientPromise = globalWithMongo._mongoClientPromise;
-} else {
-  // In production, create a new client
-  client = new MongoClient(uri, options);
-  clientPromise = client.connect();
+  // Clear cached client when connection drops so next request reconnects
+  client.on('close',          ()    => { _client = null; });
+  client.on('topologyClosed', ()    => { _client = null; });
+  client.on('error',          (err) => { console.error('[mongodb] Client error:', err.message); _client = null; });
+
+  return client;
 }
 
+// In development, preserve connection across hot reloads via global
+const globalWithMongo = global as typeof globalThis & {
+  _mongoClient?: MongoClient | null;
+};
+
+async function getClient(): Promise<MongoClient> {
+  if (process.env.NODE_ENV === 'development') {
+    if (!globalWithMongo._mongoClient) {
+      globalWithMongo._mongoClient = await createClient();
+    }
+    return globalWithMongo._mongoClient;
+  }
+
+  if (!_client) {
+    _client = await createClient();
+  }
+  return _client;
+}
+
+// Drop-in replacement — same interface as before (Promise<MongoClient>)
+const clientPromise: Promise<MongoClient> = getClient();
+
 export default clientPromise;
+
+// Named export for places that need a fresh client on reconnect
+export { getClient };
