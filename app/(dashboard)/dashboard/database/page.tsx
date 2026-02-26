@@ -28,16 +28,6 @@ type BackupEntry = {
 };
 
 const BACKUP_LOG_KEY  = 'ho_db_backup_log';
-const BACKUP_FREQ_KEY = 'ho_db_backup_freq';
-
-const FREQ_OPTIONS = [
-  { value: '5min',   label: 'Every 5 min'  },
-  { value: '10min',  label: 'Every 10 min' },
-  { value: '20min',  label: 'Every 20 min' },
-  { value: 'manual', label: 'Manual only'  },
-] as const;
-
-type FreqValue = typeof FREQ_OPTIONS[number]['value'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -712,7 +702,6 @@ function Dashboard({
   const [importResult,   setImportResult]   = useState<ImportResult | null>(null);
   const [loadingImport,  setLoadingImport]  = useState(false);
   const [dragOver,       setDragOver]       = useState(false);
-  const [backupFreq,     setBackupFreq]     = useState<FreqValue>('5min');
   const [backupLog,      setBackupLog]      = useState<BackupEntry[]>([]);
   const [backingUp,      setBackingUp]      = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -720,10 +709,8 @@ function Dashboard({
   useEffect(() => {
     getDbStats().then(setStats).catch(() => {});
     try {
-      const log  = localStorage.getItem(BACKUP_LOG_KEY);
-      const freq = localStorage.getItem(BACKUP_FREQ_KEY);
-      if (log)  setBackupLog(JSON.parse(log));
-      if (freq) setBackupFreq(freq as FreqValue);
+      const log = localStorage.getItem(BACKUP_LOG_KEY);
+      if (log) setBackupLog(JSON.parse(log));
     } catch {}
   }, []);
 
@@ -795,18 +782,10 @@ function Dashboard({
     }
   };
 
-  const saveFreq = () => {
-    localStorage.setItem(BACKUP_FREQ_KEY, backupFreq);
-    const label = FREQ_OPTIONS.find(o => o.value === backupFreq)?.label ?? backupFreq;
-    addToast(`✓ Frequency saved locally: ${label}`, 'ok');
-  };
-
   const clearImport = () => {
     setImportFile(null); setImportPreview([]); setImportProgress(0); setImportResult(null);
     if (fileRef.current) fileRef.current.value = '';
   };
-
-  const lastBackup = backupLog[0] ?? null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -879,40 +858,49 @@ function Dashboard({
         {/* ── Backup card ── */}
         <div className="db-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div className="db-card-label">GOOGLE DRIVE BACKUP</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-            <div className="db-card-label" style={{ marginBottom: 0 }}>AUTO BACKUP FREQUENCY</div>
-            <select className="db-select" value={backupFreq} onChange={e => setBackupFreq(e.target.value as FreqValue)}>
-              {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.22)', margin: 0, lineHeight: 1.5 }}>
-              Saved locally — update the cron in Coolify manually to match.
-              {backupFreq === 'manual' && (
-                <span style={{ color: '#facc15' }}> ⚠ Manual mode disables auto backup.</span>
-              )}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <button className="db-btn db-btn-blue" onClick={handleBackupNow} disabled={backingUp}>
-              {backingUp ? <><span className="db-spin">↻</span> BACKING UP…</> : '⬡ BACKUP NOW → DRIVE'}
-            </button>
-            <button className="db-btn db-btn-ghost" onClick={saveFreq}>
-              ✓ SAVE FREQUENCY
-            </button>
-          </div>
-          {backupLog.length > 0 && (
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '0.9rem' }}>
-              <div className="db-card-label" style={{ marginBottom: '0.6rem' }}>RECENT BACKUPS</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                {backupLog.slice(0, 5).map((b, i) => (
+
+          <button className="db-btn db-btn-blue" onClick={handleBackupNow} disabled={backingUp} style={{ alignSelf: 'flex-start' }}>
+            {backingUp ? <><span className="db-spin">↻</span> BACKING UP…</> : '⬡ BACKUP NOW → DRIVE'}
+          </button>
+
+          <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.28)', margin: 0, lineHeight: 1.7, borderLeft: '2px solid rgba(255,255,255,0.08)', paddingLeft: '0.75rem' }}>
+            Auto-backup runs every 5 min via Coolify scheduled task.<br />
+            To change the frequency, update the cron in Coolify directly.
+          </p>
+
+          <div>
+            <div className="db-card-label" style={{ marginBottom: '0.6rem' }}>BACKUP RUNS</div>
+            {backupLog.length === 0 ? (
+              <div style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'rgba(255,255,255,0.2)', padding: '0.5rem 0' }}>
+                No backups recorded yet on this device.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                {backupLog.slice(0, 8).map((b, i) => (
                   <div key={i} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     fontFamily: 'monospace', fontSize: '0.72rem',
-                    padding: '0.4rem 0.7rem',
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.05)',
+                    padding: '0.38rem 0.7rem',
+                    background: i === 0 ? 'rgba(74,222,128,0.04)' : 'rgba(255,255,255,0.015)',
+                    border: `1px solid ${i === 0 ? 'rgba(74,222,128,0.12)' : 'rgba(255,255,255,0.05)'}`,
                     gap: '0.5rem', flexWrap: 'wrap',
                   }}>
-                    <span style={{ color: 'rgba(255,255,255,0.4)' }}>{new Date(b.time).toLocaleString()}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      {i === 0 && <span style={{ color: '#4ade80', fontSize: '0.6rem' }}>●</span>}
+                      <span style={{ color: i === 0 ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.35)' }}>
+                        {new Date(b.time).toLocaleString()}
+                      </span>
+                      <span style={{
+                        fontFamily: 'monospace', fontSize: '0.58rem', padding: '0.1rem 0.4rem',
+                        border: '1px solid',
+                        borderColor: b.source === 'auto' ? 'rgba(96,165,250,0.3)' : 'rgba(167,139,250,0.3)',
+                        color: b.source === 'auto' ? '#60a5fa' : '#a78bfa',
+                        background: b.source === 'auto' ? 'rgba(96,165,250,0.06)' : 'rgba(167,139,250,0.06)',
+                        letterSpacing: '0.08em',
+                      }}>
+                        {b.source === 'auto' ? 'AUTO' : 'MANUAL'}
+                      </span>
+                    </div>
                     <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                       <span style={{ color: '#4ade80' }}>{b.count} rec</span>
                       {b.driveUrl && (
@@ -929,16 +917,8 @@ function Dashboard({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-          {lastBackup && (
-            <div style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.28)' }}>
-              Last backup: {new Date(lastBackup.time).toLocaleString()}
-              {lastBackup.driveUrl && (
-                <> · <a href={lastBackup.driveUrl} target="_blank" rel="noopener noreferrer" className="drive-link">open in Drive ↗</a></>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
