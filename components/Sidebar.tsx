@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import { logoutAction } from '@/actions/auth';
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -20,7 +19,6 @@ export default function Sidebar() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Close sidebar when route changes on mobile
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
@@ -107,6 +105,19 @@ export default function Sidebar() {
       )
     },
     {
+      title: 'Food',
+      href: '/dashboard/food',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M18 8h1a4 4 0 0 1 0 8h-1"></path>
+          <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path>
+          <line x1="6" y1="1" x2="6" y2="4"></line>
+          <line x1="10" y1="1" x2="10" y2="4"></line>
+          <line x1="14" y1="1" x2="14" y2="4"></line>
+        </svg>
+      )
+    },
+    {
       title: 'Database',
       href: '/dashboard/database',
       icon: (
@@ -117,7 +128,7 @@ export default function Sidebar() {
         </svg>
       )
     },
-        {
+    {
       title: 'Bot Config',
       href: '/dashboard/bot',
       icon: (
@@ -228,50 +239,6 @@ export default function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Logout Button */}
-      <div style={{ padding: '0 1rem', marginTop: 'auto' }}>
-        <button
-          onClick={async () => {
-            const result = await logoutAction();
-            if (result.success) window.location.href = '/login';
-          }}
-          style={{
-            width: '100%',
-            padding: '0.875rem 1rem',
-            backgroundColor: 'transparent',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            color: 'rgba(255, 255, 255, 0.6)',
-            fontFamily: 'monospace',
-            fontSize: '0.875rem',
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem',
-            letterSpacing: '0.02em'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-            e.currentTarget.style.color = '#fff';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-            e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)';
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-              <polyline points="16 17 21 12 16 7"></polyline>
-              <line x1="21" y1="12" x2="9" y2="12"></line>
-            </svg>
-          </span>
-          <span>Logout</span>
-        </button>
-      </div>
     </div>
   );
 
@@ -279,7 +246,6 @@ export default function Sidebar() {
   if (isMobile) {
     return (
       <>
-        {/* Top mobile bar */}
         <div style={{
           position: 'fixed',
           top: 0,
@@ -302,8 +268,6 @@ export default function Sidebar() {
           }}>
             HACKOVERFLOW
           </h1>
-
-          {/* Hamburger button */}
           <button
             onClick={() => setIsOpen(prev => !prev)}
             style={{
@@ -334,7 +298,6 @@ export default function Sidebar() {
           </button>
         </div>
 
-        {/* Backdrop */}
         {isOpen && (
           <div
             onClick={() => setIsOpen(false)}
@@ -348,7 +311,6 @@ export default function Sidebar() {
           />
         )}
 
-        {/* Slide-out drawer */}
         <div style={{
           position: 'fixed',
           top: 0,
@@ -364,7 +326,6 @@ export default function Sidebar() {
           {sidebarContent}
         </div>
 
-        {/* Spacer so page content doesn't hide under the top bar */}
         <div style={{ height: '60px' }} />
       </>
     );

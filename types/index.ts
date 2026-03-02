@@ -7,6 +7,56 @@
  * @module types
  */
 
+// ===================================
+// MEAL TRACKING
+// ===================================
+
+/**
+ * Tracks meal consumption across the 3-day hackathon.
+ *
+ * Schedule:
+ *   Day 1 → Dinner
+ *   Day 2 → Breakfast, Lunch, Dinner
+ *   Day 3 → Breakfast, Lunch
+ */
+export interface MealStatus {
+  day1_dinner: boolean;
+  day2_breakfast: boolean;
+  day2_lunch: boolean;
+  day2_dinner: boolean;
+  day3_breakfast: boolean;
+  day3_lunch: boolean;
+}
+
+/** Default meal status — all false on participant creation */
+export const DEFAULT_MEAL_STATUS: MealStatus = {
+  day1_dinner: false,
+  day2_breakfast: false,
+  day2_lunch: false,
+  day2_dinner: false,
+  day3_breakfast: false,
+  day3_lunch: false,
+};
+
+/** Human-readable labels for each meal slot */
+export const MEAL_LABELS: Record<keyof MealStatus, string> = {
+  day1_dinner: "Day 1 – Dinner",
+  day2_breakfast: "Day 2 – Breakfast",
+  day2_lunch: "Day 2 – Lunch",
+  day2_dinner: "Day 2 – Dinner",
+  day3_breakfast: "Day 3 – Breakfast",
+  day3_lunch: "Day 3 – Lunch",
+};
+
+/** Returns how many meals a participant has collected */
+export function countMealsTaken(meals: MealStatus): number {
+  return Object.values(meals).filter(Boolean).length;
+}
+
+// ===================================
+// BASE PARTICIPANT (CSV import)
+// ===================================
+
 /** Base participant data from CSV import */
 export interface Participant {
   readonly name: string;
@@ -16,6 +66,10 @@ export interface Participant {
   readonly phone?: string;
 }
 
+// ===================================
+// DATABASE PARTICIPANT
+// ===================================
+
 /** Database participant with all hackathon details */
 export interface DBParticipant {
   _id?: string;
@@ -24,13 +78,25 @@ export interface DBParticipant {
   email: string;
   phone?: string;
   role?: string;
+
+  // ── Team ──────────────────────────────────────────────
   teamName?: string;
+  /** Unique team identifier, e.g. "TEAM-001". Stable even if teamName changes. */
+  teamId?: string;
+
+  // ── Project ───────────────────────────────────────────
+  projectName?: string;
+  projectDescription?: string;
+
+  // ── Venue ─────────────────────────────────────────────
   institute?: string;
   labAllotted?: string;
   wifiCredentials?: {
     ssid?: string;
     password?: string;
   };
+
+  // ── Check-in / Check-out ──────────────────────────────
   collegeCheckIn?: {
     status: boolean;
     time?: Date;
@@ -49,14 +115,28 @@ export interface DBParticipant {
     status: boolean;
     time?: Date;
   };
+
+  // ── Meals ─────────────────────────────────────────────
+  /** Meal collection status across all 3 days */
+  meals?: MealStatus;
+
+  // ── Metadata ──────────────────────────────────────────
   createdAt?: Date;
   updatedAt?: Date;
 }
+
+// ===================================
+// UI TYPES
+// ===================================
 
 /** Participant with selection state for UI lists */
 export interface SelectableParticipant extends Participant {
   selected: boolean;
 }
+
+// ===================================
+// ID CARD
+// ===================================
 
 /** ID card data with generated fields */
 export interface IDCardData {
@@ -76,6 +156,10 @@ export interface HackathonInfo {
   readonly venue: string;
 }
 
+// ===================================
+// EMAIL
+// ===================================
+
 /** Result from batch email sending */
 export interface EmailResult {
   readonly success: boolean;
@@ -90,6 +174,10 @@ export interface SendEmailRequest {
   readonly htmlContent: string;
   readonly recipients: Participant[];
 }
+
+// ===================================
+// SPONSOR
+// ===================================
 
 /** Database sponsor with company details */
 export interface DBSponsor {

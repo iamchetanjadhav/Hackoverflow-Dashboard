@@ -37,14 +37,14 @@ const CARD_FORMAT: [number, number] = [CARD_WIDTH_MM, CARD_HEIGHT_MM];
 //    NAME_FONT_SIZE = 14 (bigger text)
 //    Then adjust up/down from there
 
-const NAME_X_OFFSET = 0;             // Horizontal offset for name (negative = LEFT, positive = RIGHT)
-const NAME_Y_POSITION = 68.5;        // Distance from top for name (increase to move DOWN)
-const NAME_FONT_SIZE = 10;           // Font size for participant name
+const NAME_X_OFFSET = 9.6;             // Horizontal offset for name (negative = LEFT, positive = RIGHT)
+const NAME_Y_POSITION = 56.0;        // Distance from top for name (increase to move DOWN)
+const NAME_FONT_SIZE = 8;           // Font size for participant name
 const NAME_LINE_SPACING = 5;         // Space between lines for long names
 
-const QR_SIZE = 15;                  // QR code size in mm (increase for bigger QR)
-const QR_X_OFFSET = 0;              // Horizontal offset for QR (negative = LEFT, positive = RIGHT)
-const QR_Y_POSITION = 48;           // Distance from top for QR code (increase to move DOWN)
+const QR_SIZE = 14.5;                  // QR code size in mm (increase for bigger QR)
+const QR_X_OFFSET = -15.8;              // Horizontal offset for QR (negative = LEFT, positive = RIGHT)
+const QR_Y_POSITION = 50.7;           // Distance from top for QR code (increase to move DOWN)
 
 // High-DPI rendering: 5x = professional print quality (1134px width)
 // Increase to 6x or 7x for even sharper output if needed
