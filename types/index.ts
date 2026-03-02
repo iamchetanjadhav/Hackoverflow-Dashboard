@@ -147,6 +147,8 @@ export interface IDCardData {
   readonly phone: string;
   readonly participantId: string;
   readonly qrCodeDataURL: string;
+  /** Optional team identifier shown on the card (e.g. "TEAM-001") */
+  readonly teamId?: string;
 }
 
 /** Hackathon event metadata for ID cards */
