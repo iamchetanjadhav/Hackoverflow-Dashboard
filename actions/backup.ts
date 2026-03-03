@@ -12,32 +12,22 @@ export interface BackupResult {
 }
 
 async function uploadToDrive(csv: string, filename: string): Promise<string> {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+  );
 
-  if (!email)  throw new Error('[Backup] GOOGLE_SERVICE_ACCOUNT_EMAIL is not set');
-  if (!rawKey) throw new Error('[Backup] GOOGLE_PRIVATE_KEY is not set');
-
-  // Handle both formats: literal \n text OR real newlines
-  const key = rawKey.includes('\\n')
-    ? rawKey.replace(/\\n/g, '\n')
-    : rawKey;
-
-  const auth = new google.auth.JWT({
-    email,
-    key,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
+  oauth2Client.setCredentials({
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
   });
 
-  await auth.authorize();
-
-  const drive = google.drive({ version: 'v3', auth });
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
   const response = await drive.files.create({
     requestBody: {
-      name:     filename,
+      name:    filename,
       mimeType: 'text/csv',
-      parents:  [process.env.GOOGLE_DRIVE_FOLDER_ID!],
+      parents: [process.env.GOOGLE_DRIVE_FOLDER_ID!],
     },
     media: {
       mimeType: 'text/csv',
