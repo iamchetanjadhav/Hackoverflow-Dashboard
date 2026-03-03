@@ -12,16 +12,15 @@ export interface BackupResult {
 }
 
 async function uploadToDrive(csv: string, filename: string): Promise<string> {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-  );
-
-  oauth2Client.setCredentials({
-    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key:  process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
   });
 
-  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+  const drive = google.drive({ version: 'v3', auth });
 
   const response = await drive.files.create({
     requestBody: {
