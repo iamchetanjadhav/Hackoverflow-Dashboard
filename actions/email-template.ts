@@ -469,10 +469,14 @@ function footerBlock(c: EmailContent): string {
                      align="center" style="margin:0 auto 22px;">
                 <tr>${socialCells}</tr>
               </table>
-              <p style="margin:0;font-family:'Poppins',Arial,sans-serif;font-size:10px;
+              <!-- Split footer text so Gmail doesn't flag it as quoted repeat content -->
+              <p style="margin:0 0 2px;font-family:'Poppins',Arial,sans-serif;font-size:10px;
                  color:rgba(255,255,255,0.10);line-height:1.9;">
-                You&rsquo;re receiving this because you registered for Hackoverflow 4.0.<br/>
-                &copy; 2025 Hackoverflow. All rights reserved.
+                Sent to you as a registered participant of Hackoverflow 4.0.
+              </p>
+              <p style="margin:0;font-family:'Poppins',Arial,sans-serif;font-size:10px;
+                 color:rgba(255,255,255,0.08);line-height:1.9;">
+                &copy; 2025 Hackoverflow&nbsp;&middot;&nbsp;All rights reserved.
               </p>
             </td>
           </tr>
@@ -493,6 +497,9 @@ export function assembleEmailHtml(c: EmailContent): string {
     cta:     !!c.cta,
   };
   const hasSecondary = has.callout || has.grid || has.list;
+
+  // Unique per render — prevents Gmail collapsing repeated emails as quoted thread content
+  const uid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml"
@@ -583,6 +590,11 @@ export function assembleEmailHtml(c: EmailContent): string {
       </td>
     </tr>
   </table>
+
+  <!-- Unique render token — changes every send so Gmail never collapses
+       this email as a quoted reply in a conversation thread. -->
+  <div style="display:none;max-height:0;overflow:hidden;font-size:0;
+              line-height:0;color:#111111;mso-hide:all;" aria-hidden="true">uid:${uid}</div>
 
 </body>
 </html>`;
