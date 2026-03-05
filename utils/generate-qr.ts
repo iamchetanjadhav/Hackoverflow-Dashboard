@@ -24,7 +24,7 @@ export async function generateQRCode(participantId: string): Promise<string> {
       throw new Error('Invalid participant ID');
     }
 
-    const checkInUrl = `https://checkin.hackoverflow4.tech/checkin/${participantId}`;
+    const checkInUrl = `https://checkin.hackoverflow4.tech/participant/${participantId}`;
     console.log('Generating branded QR code for:', checkInUrl);
     
     // Generate QR code data
